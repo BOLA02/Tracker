@@ -32,7 +32,7 @@ export default function HomePae(){
 }, []);
 
   if(loading) {
-    return <p>Loading....</p>;
+    return <p className="margin-auto">Loading....</p>;
   } 
 
   return session ? (

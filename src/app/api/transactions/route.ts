@@ -1,73 +1,79 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-// import type { Database } from '@/types/supabase'; // optional if you have typed DB schema
-type Transaction = {
-  id: string;
-  user_id: string;
-  amount: number;
-  category: string;
-  date: string;
-  description?: string;
-};
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Create Supabase admin client (server-only, because it uses the secret key)
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-// GET: fetch all transactions for all users (sorted by date desc)
-export async function GET() {
-  const { data, error } = await supabaseAdmin
-    .from('transactions')
-    .select('*')
-    .order('date', { ascending: false });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json(data);
-}
-
-// POST: create a new transaction (requires user token in header)
 export async function POST(request: Request) {
   const authHeader = request.headers.get('authorization');
-
-  if (!authHeader) {
+  if (!authHeader)
     return NextResponse.json({ error: 'Missing Authorization header' }, { status: 401 });
-  }
 
   const token = authHeader.split(' ')[1];
-
-  if (!token) {
-    return NextResponse.json({ error: 'Invalid Authorization header format' }, { status: 401 });
-  }
-
-  // Verify user using the token
   const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-
-  if (userError || !userData.user) {
+  if (userError || !userData.user)
     return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
-  }
 
   const user_id = userData.user.id;
+  const { amount, category, date, description } = await request.json();
 
-  const body = await request.json();
-  const { amount, category, date, description } = body;
-
-  if (!amount || !category || !date) {
+  if (!amount || !category || !date)
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+
+  // 🧠 STEP 1: Get the user's budget for this category
+  const { data: budget } = await supabaseAdmin
+    .from('budgets')
+    .select('amount')
+    .eq('user_id', user_id)
+    .eq('category', category)
+    .single();
+
+  if (!budget)
+    return NextResponse.json({ error: `No budget found for category: ${category}` }, { status: 400 });
+
+  // 🧠 STEP 2: Get total spent this month in this category
+  const today = new Date();
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+
+  const { data: transactions } = await supabaseAdmin
+    .from('transactions')
+    .select('amount')
+    .eq('user_id', user_id)
+    .eq('category', category)
+    .gte('date', startOfMonth);
+
+  const spent = transactions?.reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0) || 0;
+
+  // 🧠 STEP 3: Check if debit would exceed the budget
+  const remaining = budget.amount - spent;
+
+  if (parseFloat(amount) > remaining) {
+    return NextResponse.json(
+      {
+        error: `🚫 Insufficient funds. Your remaining ${category} budget is ₦${remaining.toFixed(2)}, but you're trying to debit ₦${amount}`,
+      },
+      { status: 400 }
+    );
   }
 
-  const { data, error } = await supabaseAdmin
+  // ✅ STEP 4: Save the transaction (as a debit)
+  const { data: tx, error: txError } = await supabaseAdmin
     .from('transactions')
-    .insert([{ user_id, amount, category, date, description }])
+    .insert([
+      {
+        user_id,
+        category,
+        amount: -Math.abs(amount), // Ensure it's negative
+        date,
+        description,
+      },
+    ])
     .select()
     .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (txError)
+    return NextResponse.json({ error: txError.message }, { status: 500 });
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json(tx, { status: 201 });
 }

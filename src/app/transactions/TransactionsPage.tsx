@@ -1,321 +1,546 @@
-'use client'
+'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Calendar, Tag, DollarSign, FileText, TrendingUp, TrendingDown } from 'lucide-react';
-import {supabase} from '../../../lib/supabaseClient'
+import { supabase } from '../../../lib/supabaseClient';
+import type { Session } from '@supabase/supabase-js';
+import { 
+  PlusCircle, 
+  MinusCircle, 
+  TrendingUp, 
+  TrendingDown, 
+  Clock, 
+  CreditCard, 
+  DollarSign,
+  ChevronDown,
+  ChevronUp,
+  LogOut,
+  Wallet,
+  Receipt,
+  AlertCircle,
+  CheckCircle,
+  X
+} from 'lucide-react';
 
-type Props = {
-  session: any;
-};
-
-type Transaction = {
-  id: string;
-  user_id: string;
-  amount: number;
+type Budget = {
   category: string;
-  date: string;
-  description?: string;
+  amount: number;
 };
 
-export default function TransactionsPage({ session }: Props) {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+type Toast = {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+};
+
+export default function TransactionsPage({ session }: { session: Session }) {
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [spentMap, setSpentMap] = useState<Record<string, number>>({});
+  const [openFormCategory, setOpenFormCategory] = useState<string | null>(null);
+  const [newBudget, setNewBudget] = useState({ category: 'Transport', amount: '' });
+  const [showHistory, setShowHistory] = useState(false);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [form, setForm] = useState({
     amount: '',
-    category: '',
-    date: '',
     description: '',
+    category: '',
   });
-  const [loading, setLoading] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+
+  // Toast functions
+  const addToast = (type: 'success' | 'error' | 'info', message: string) => {
+    const id = Date.now().toString();
+    const newToast = { id, type, message };
+    setToasts(prev => [...prev, newToast]);
+    
+    setTimeout(() => {
+      removeToast(id);
+    }, 4000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  };
+
+  // Category icons
+  const getCategoryIcon = (category: string) => {
+    const icons = {
+      Transport: '🚗',
+      Food: '🍽️',
+      Bills: '💡',
+      Health: '⚕️',
+      Other: '📦'
+    };
+    return icons[category as keyof typeof icons] || '📦';
+  };
+
+  const getCategoryColor = (category: string) => {
+    const colors = {
+      Transport: 'from-blue-500 to-blue-600',
+      Food: 'from-green-500 to-green-600',
+      Bills: 'from-yellow-500 to-yellow-600',
+      Health: 'from-red-500 to-red-600',
+      Other: 'from-purple-500 to-purple-600'
+    };
+    return colors[category as keyof typeof colors] || 'from-gray-500 to-gray-600';
+  };
 
   useEffect(() => {
-    fetch('/api/transactions')
-      .then((res) => res.json())
-      .then(setTransactions);
+    const fetchData = async () => {
+      setIsLoading(true);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Fetch budgets
+      const { data: budgetData } = await supabase
+        .from('budgets')
+        .select('category, amount')
+        .eq('user_id', user.id);
+
+      if (budgetData) setBudgets(budgetData);
+
+      // Fetch monthly spend
+      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+        .toISOString()
+        .slice(0, 10);
+
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('category, amount')
+        .eq('user_id', user.id)
+        .gte('date', startOfMonth);
+
+      const map: Record<string, number> = {};
+      transactions?.forEach((tx) => {
+        const amt = Number(tx.amount);
+        const cat = tx.category;
+        map[cat] = (map[cat] || 0) + Math.abs(amt);
+      });
+
+      setSpentMap(map);
+      setIsLoading(false);
+    };
+
+    fetchData();
   }, []);
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  }
+  useEffect(() => {
+    const fetchTransactions = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("date", { ascending: false });
 
-    if (!session) {
-      alert('Please login first');
-      setLoading(false);
-      return;
-    }
+      if (data) setTransactions(data);
+    };
 
-    const token = session.access_token;
+    fetchTransactions();
+  }, []);
+
+  const handleDebit = async () => {
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
 
     const res = await fetch('/api/transactions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization:`Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        amount: Number(form.amount),
+        amount: parseFloat(form.amount),
+        description: form.description,
         category: form.category,
-        date: form.date,
-        description: form.description || undefined,
+        date: new Date().toISOString().slice(0, 10),
       }),
     });
 
+    const result = await res.json();
+
     if (!res.ok) {
-      const err = await res.json();
-      alert(`Error: ${err.error}`);
-      setLoading(false);
+      addToast('error', result.error);
       return;
     }
 
-    const created = await res.json();
-    setTransactions((prev) => [...prev, created]);
-    setForm({ amount: '', category: '', date: '', description: '' });
-    setShowForm(false);
-    setLoading(false);
+    // Update spentMap directly
+    const newSpentMap = { ...spentMap };
+    const existingSpent = newSpentMap[form.category] || 0;
+    const newSpent = existingSpent + Math.abs(parseFloat(form.amount));
+    newSpentMap[form.category] = newSpent;
+    setSpentMap(newSpentMap);
+
+    // Reset form
+    addToast('success', 'Transaction recorded successfully!');
+    setForm({ amount: '', description: '', category: '' });
+    setOpenFormCategory(null);
+  };
+
+  const handleBudgetSave = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const category = newBudget.category;
+    const incoming = parseFloat(newBudget.amount);
+    if (isNaN(incoming)) {
+      addToast('error', 'Please enter a valid amount');
+      return;
+    }
+
+    // Get current budget (if exists)
+    const { data: existingBudget } = await supabase
+      .from("budgets")
+      .select("amount")
+      .eq("user_id", user.id)
+      .eq("category", category)
+      .single();
+
+    const current = existingBudget?.amount || 0;
+    const total = current + incoming;
+
+    // Save the new total
+    const { error } = await supabase.from("budgets").upsert(
+      [
+        {
+          user_id: user.id,
+          category,
+          amount: total,
+        },
+      ],
+      { onConflict: "user_id,category" }
+    );
+
+    if (error) {
+      addToast('error', error.message);
+    } else {
+      addToast('success', 'Budget updated successfully!');
+
+      // Update budgets locally
+      const updated = [...budgets];
+      const existing = updated.find((b) => b.category === category);
+
+      if (existing) {
+        existing.amount = total;
+      } else {
+        updated.push({ category, amount: total });
+      }
+
+      setBudgets(updated);
+      setNewBudget({ category: 'Transport', amount: '' });
+    }
+  };
+
+  const totalBudget = budgets.reduce((sum, b) => sum + b.amount, 0);
+  const totalSpent = Object.values(spentMap).reduce((sum, spent) => sum + spent, 0);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading your budget...</p>
+        </div>
+      </div>
+    );
   }
 
-  const totalAmount = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-  const positiveTransactions = transactions.filter(tx => tx.amount > 0);
-  const negativeTransactions = transactions.filter(tx => tx.amount < 0);
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-    }).format(amount);
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const getCategoryColor = (category: string) => {
-    const colors = {
-      'Food': 'bg-orange-100 text-orange-800',
-      'Transportation': 'bg-blue-100 text-blue-800',
-      'Entertainment': 'bg-purple-100 text-purple-800',
-      'Shopping': 'bg-pink-100 text-pink-800',
-      'Bills': 'bg-red-100 text-red-800',
-      'Income': 'bg-green-100 text-green-800',
-      'default': 'bg-gray-100 text-gray-800',
-    };
-    return colors[category as keyof typeof colors] || colors.default;
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto">
-            {/* Header */}
-            <div className="mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Transaction Dashboard</h1>
-            <p className="text-gray-600">Track and manage your financial transactions</p>
-            <button
-              onClick={async() => {
-              await supabase.auth.signOut()
-              ;}}
-              className= "bg-red-500 text-white px-4 py-2 rounded">
-            SignOut</button>
-            </div>
-
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-sm font-medium text-gray-500">Total Balance</p>
-                    <p className={`text-2xl font-bold ${totalAmount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(totalAmount)}
-                    </p>
-                </div>
-                <div className={`p-3 rounded-full ${totalAmount >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
-                    <DollarSign className={`w-6 h-6 ${totalAmount >= 0 ? 'text-green-600' : 'text-red-600'}`} />
-                </div>
-                </div>
-            </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Income</p>
-                <p className="text-2xl font-bold text-green-600">
-                  {formatCurrency(positiveTransactions.reduce((sum, tx) => sum + tx.amount, 0))}
-                </p>
-              </div>
-              <div className="p-3 rounded-full bg-green-100">
-                <TrendingUp className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Expenses</p>
-                <p className="text-2xl font-bold text-red-600">
-                  {formatCurrency(Math.abs(negativeTransactions.reduce((sum, tx) => sum + tx.amount, 0)))}
-                </p>
-              </div>
-              <div className="p-3 rounded-full bg-red-100">
-                <TrendingDown className="w-6 h-6 text-red-600" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Add Transaction Button */}
-        <div className="mb-8">
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center gap-2"
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      {/* Toast Container */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg transform transition-all duration-300 ease-in-out ${
+              toast.type === 'success' 
+                ? 'bg-green-500 text-white' 
+                : toast.type === 'error' 
+                ? 'bg-red-500 text-white' 
+                : 'bg-blue-500 text-white'
+            }`}
           >
-            <Plus className="w-5 h-5" />
-            Add New Transaction
-          </button>
+            {toast.type === 'success' && <CheckCircle size={20} />}
+            {toast.type === 'error' && <AlertCircle size={20} />}
+            {toast.type === 'info' && <AlertCircle size={20} />}
+            <span className="text-sm font-medium">{toast.message}</span>
+            <button
+              onClick={() => removeToast(toast.id)}
+              className="ml-2 hover:bg-white/20 rounded-full p-1"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="max-w-6xl mx-auto p-6">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-3 rounded-xl">
+                <Wallet className="text-white" size={24} />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">Budget Manager</h1>
+                <p className="text-gray-600">Track your expenses and stay on budget</p>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+              }}
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors"
+            >
+              <LogOut size={18} />
+              Logout
+            </button>
+          </div>
         </div>
 
-            {/* Transaction Form */}
-        {showForm && (
-          <div className="bg-white rounded-2xl shadow-lg p-8 mb-8 border border-gray-100">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Add New Transaction</h2>
-            <div onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <DollarSign className="w-4 h-4 inline mr-1" />
-                    Amount
-                  </label>
-                  <input
-                    name="amount"
-                    type="number"
-                    step="0.01"
-                    value={form.amount}
-                    onChange={handleChange}
-                    placeholder="Enter amount"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Total Budget</p>
+                <p className="text-2xl font-bold text-gray-900">₦{totalBudget.toFixed(2)}</p>
+              </div>
+              <div className="bg-blue-100 p-3 rounded-lg">
+                <DollarSign className="text-blue-600" size={24} />
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Total Spent</p>
+                <p className="text-2xl font-bold text-red-600">₦{totalSpent.toFixed(2)}</p>
+              </div>
+              <div className="bg-red-100 p-3 rounded-lg">
+                <TrendingDown className="text-red-600" size={24} />
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-600">Remaining</p>
+                <p className={`text-2xl font-bold ${totalBudget - totalSpent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  ₦{(totalBudget - totalSpent).toFixed(2)}
+                </p>
+              </div>
+              <div className={`p-3 rounded-lg ${totalBudget - totalSpent >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                <TrendingUp className={totalBudget - totalSpent >= 0 ? 'text-green-600' : 'text-red-600'} size={24} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Budget Creation */}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <PlusCircle className="text-indigo-600" size={24} />
+              <h2 className="text-xl font-bold text-gray-900">Create New Budget</h2>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <select
+                  value={newBudget.category}
+                  onChange={(e) => setNewBudget({ ...newBudget, category: e.target.value })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  {['Transport', 'Food', 'Bills', 'Health', 'Other'].map((cat) => (
+                    <option key={cat} value={cat}>
+                      {getCategoryIcon(cat)} {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Amount (₦)</label>
+                <input
+                  type="number"
+                  placeholder="Enter monthly budget amount"
+                  value={newBudget.amount}
+                  onChange={(e) => setNewBudget({ ...newBudget, amount: e.target.value })}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+
+              <button
+                onClick={handleBudgetSave}
+                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 font-medium"
+              >
+                Save Budget
+              </button>
+            </div>
+          </div>
+
+          {/* Transaction History */}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="flex items-center justify-between w-full mb-4 p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Receipt className="text-gray-600" size={20} />
+                <span className="text-lg font-semibold text-gray-900">Transaction History</span>
+              </div>
+              {showHistory ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            </button>
+
+            {showHistory && (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {transactions.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Receipt size={48} className="mx-auto mb-4 opacity-50" />
+                    <p>No transactions yet</p>
+                  </div>
+                ) : (
+                  transactions.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl">{getCategoryIcon(tx.category)}</div>
+                        <div>
+                          <p className="font-medium text-gray-900">{tx.category}</p>
+                          <p className="text-sm text-gray-500">{tx.description || 'No description'}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold text-red-600">₦{Math.abs(tx.amount).toFixed(2)}</p>
+                        <p className="text-xs text-gray-400">{new Date(tx.date).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Budget Cards */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {budgets.map((budget) => {
+            const spent = spentMap[budget.category] || 0;
+            const remaining = budget.amount - spent;
+            const percentage = budget.amount > 0 ? (spent / budget.amount) * 100 : 0;
+            const isOpen = openFormCategory === budget.category;
+
+            return (
+              <div key={budget.category} className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className={`h-2 bg-gradient-to-r ${getCategoryColor(budget.category)}`}></div>
                 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Tag className="w-4 h-4 inline mr-1" />
-                    Category
-                  </label>
-                  <input
-                    name="category"
-                    type="text"
-                    value={form.category}
-                    onChange={handleChange}
-                    placeholder="Enter category"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{getCategoryIcon(budget.category)}</span>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{budget.category}</h3>
+                        <p className="text-sm text-gray-500">Monthly Budget</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setOpenFormCategory(isOpen ? null : budget.category);
+                        setForm({ amount: '', description: '', category: budget.category });
+                      }}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    >
+                      <MinusCircle size={16} />
+                      {isOpen ? 'Close' : 'Spend'}
+                    </button>
+                  </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Calendar className="w-4 h-4 inline mr-1" />
-                    Date
-                  </label>
-                  <input
-                    name="date"
-                    type="date"
-                    value={form.date}
-                    onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Budget</span>
+                      <span className="font-medium">₦{budget.amount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Spent</span>
+                      <span className="font-medium text-red-600">₦{spent.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Remaining</span>
+                      <span className={`font-medium ${remaining >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ₦{remaining.toFixed(2)}
+                      </span>
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <FileText className="w-4 h-4 inline mr-1" />
-                    Description
-                  </label>
-                  <input
-                    name="description"
-                    type="text"
-                    value={form.description}
-                    onChange={handleChange}
-                    placeholder="Enter description (optional)"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
-              </div>
+                    {/* Progress Bar */}
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          percentage <= 75 ? 'bg-green-500' : 
+                          percentage <= 90 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}
+                        style={{ width: `${Math.min(percentage, 100)}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-gray-500 text-center">{percentage.toFixed(1)}% used</p>
+                  </div>
 
-              <div className="flex gap-4">
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  className="bg-gradient-to-r from-green-600 to-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {loading ? 'Adding...' : 'Add Transaction'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="bg-gray-200 text-gray-700 px-8 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-all duration-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Transactions List */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-          <div className="px-8 py-6 border-b border-gray-200">
-            <h2 className="text-2xl font-bold text-gray-900">Recent Transactions</h2>
-            <p className="text-gray-600 mt-1">{transactions.length} transactions total</p>
-          </div>
-
-          {transactions.length === 0 ? (
-            <div className="text-center py-12">
-              <DollarSign className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 text-lg">No transactions yet</p>
-              <p className="text-gray-400">Add your first transaction to get started</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {transactions.map((tx) => (
-                <div key={tx.id} className="px-8 py-6 hover:bg-gray-50 transition-colors duration-200">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`p-3 rounded-full ${tx.amount >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
-                        {tx.amount >= 0 ? (
-                          <TrendingUp className="w-5 h-5 text-green-600" />
-                        ) : (
-                          <TrendingDown className="w-5 h-5 text-red-600" />
-                        )}
+                  {isOpen && (
+                    <div className="mt-6 space-y-4 border-t pt-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Amount</label>
+                        <input
+                          type="number"
+                          required
+                          placeholder="Enter amount"
+                          value={form.amount}
+                          onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
                       </div>
                       <div>
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getCategoryColor(tx.category)}`}>
-                            {tx.category}
-                          </span>
-                          <span className="text-sm text-gray-500">{formatDate(tx.date)}</span>
-                        </div>
-                        {tx.description && (
-                          <p className="text-gray-600 text-sm">{tx.description}</p>
-                        )}
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="What did you spend on?"
+                          value={form.description}
+                          onChange={(e) => setForm({ ...form, description: e.target.value })}
+                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
                       </div>
+                      <button
+                        onClick={handleDebit}
+                        className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white py-3 rounded-lg hover:from-green-700 hover:to-green-800 transition-all duration-300 font-medium"
+                      >
+                        Record Expense
+                      </button>
                     </div>
-                    <div className="text-right">
-                      <p className={`text-xl font-bold ${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
-                      </p>
-                    </div>
-                  </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
