@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
+import SpendingWarning from '../../../components/alerts/SpendingWarning';
 import { 
   PlusCircle, 
   MinusCircle, 
@@ -454,7 +455,12 @@ export default function TransactionsPage({ session }: { session: Session }) {
             return (
               <div key={budget.category} className="bg-white rounded-xl shadow-lg overflow-hidden">
                 <div className={`h-2 bg-gradient-to-r ${getCategoryColor(budget.category)}`}></div>
-                
+                <SpendingWarning
+                  category={budget.category}
+                  budget={budget.amount}
+                  totalSpent={spent}
+                />
+
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-3">

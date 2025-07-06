@@ -33,6 +33,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `No budget found for category: ${category}` }, { status: 400 });
 
   // 🧠 STEP 2: Get total spent this month in this category
+
+  
   const today = new Date();
   const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
 
@@ -56,6 +58,40 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  // 🧠 STEP 3.5: Count overspent days this month
+
+// Refetch full transaction rows so we have date + amount
+const { data: fullTxs } = await supabaseAdmin
+  .from('transactions')
+  .select('amount, date')
+  .eq('user_id', user_id)
+  .eq('category', category)
+  .gte('date', startOfMonth);
+
+const groupedByDay: Record<string, number> = {};
+
+fullTxs?.forEach((tx) => {
+  const dateStr = tx.date;
+  groupedByDay[dateStr] = (groupedByDay[dateStr] || 0) + Math.abs(Number(tx.amount));
+});
+
+const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+const dailyBudget = budget.amount / daysInMonth;
+
+let overspentDays = 0;
+for (const day in groupedByDay) {
+  if (groupedByDay[day] > dailyBudget * 1.2) {
+    overspentDays++;
+  }
+}
+
+if (overspentDays >= 2) {
+  return NextResponse.json({
+    error: `🔒 This category is soft-locked. You’ve overspent on ${overspentDays} days this month.`
+  }, { status: 403 });
+}
+
 
   // ✅ STEP 4: Save the transaction (as a debit)
   const { data: tx, error: txError } = await supabaseAdmin
