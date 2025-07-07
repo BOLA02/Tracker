@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 💸 Smart Budget Tracker
 
-## Getting Started
+A full-stack expense tracking app built with **Next.js 14**, **Supabase**, and **TypeScript**, designed to help users manage their monthly budgets, track spending habits, and promote financial discipline using intelligent soft locks and warnings.
 
-First, run the development server:
+---
+
+## 🔍 Features
+
+- 🔐 **Authentication** – User login/signup via Supabase Auth.
+- 💰 **Budget Setup** – Set monthly budgets per category (e.g. Transport, Food, Bills).
+- 📆 **Smart Daily Allowance** – Automatically divides budget by number of days in the month.
+- 🚨 **Overspending Detection** – Warns users when they exceed daily spending allowance.
+- 🔒 **Soft Lock System** – Disables spending if a user overspends for 2+ days in a month.
+- 📊 **Live Tracker** – View how much has been spent, what remains, and % used.
+- 📁 **Transaction History** – Shows all expense records with categories and dates.
+- ⚡ **Optimistic UI** – Updates budget and transaction list in real-time.
+
+---
+
+## 🛠️ Tech Stack
+
+| Tech            | Usage                                      |
+|-----------------|---------------------------------------------|
+| **Next.js 14**  | App framework with App Router               |
+| **TypeScript**  | Type safety across components and logic     |
+| **Supabase**    | Auth, Database, API (PostgreSQL)            |
+| **Tailwind CSS**| Utility-first styling                       |
+| **Vercel**      | Hosting & CI/CD deployment                  |
+| **Lucide Icons**| Clean open-source UI icons                  |
+
+---
+
+## 🚀 Getting Started
+
+### 1. Clone the repo
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+git clone https://github.com/yourusername/budget-tracker.git
+cd budget-tracker
